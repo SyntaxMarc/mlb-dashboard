@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MLB Master Betting Dashboard v1.1</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --accent:#0074D9;
+    --bg:#f3f6f9;
+    --card:#fff;
+    --muted:#666;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+  .wrap{max-width:1100px;margin:22px auto;padding:18px;}
+  header{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:14px}
+  h1{margin:0;font-size:20px}
+  .topline{color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 420px;gap:16px}
+  .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(12,30,60,0.06)}
+  label{display:block;font-weight:600;margin-top:8px;color:#222}
+  input[type="text"], input[type="number"], select {
+    width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;margin-top:6px;box-sizing:border-box;font-size:14px;
+  }
+  .row{display:flex;gap:10px;align-items:center}
+  button{background:var(--accent);color:white;padding:10px 12px;border-radius:8px;border:none;cursor:pointer}
+  button.secondary{background:#666}
+  small.help{color:var(--muted);display:block;margin-top:6px}
+
+  /* suggestions */
+  .suggest-wrap{position:relative}
+  #suggestions{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:30;background:white;border-radius:8px;border:1px solid #eee;max-height:220px;overflow:auto;display:none}
+  #suggestions div{padding:8px 10px;cursor:pointer}
+  #suggestions div:hover{background:#f4f7fb}
+
+  /* bets table */
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+  th,td{padding:10px;border-bottom:1px solid #eee;text-align:center}
+  th{background:var(--accent);color:white;font-weight:600}
+  .team-cell{display:flex;align-items:center;gap:8px;justify-content:center}
+  .logo{width:34px;height:34px;object-fit:contain;border-radius:6px}
+  .ev-pos{color:green;font-weight:700}
+  .ev-neg{color:#c0392b;font-weight:700}
+  .small-muted{font-size:12px;color:var(--muted)}
+
+  /* summary / footer */
+  .summary-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .pill{background:#f6f9fc;border:1px solid #e6eef7;padding:8px 10px;border-radius:10px;font-weight:600}
+
+  /* filters */
+  .filters{display:flex;gap:8px;align-items:center;margin-top:8px}
+
+  /* game panel */
+  #gamePanel .team-logo{height:46px;margin-right:8px}
+  #gamePanel ul{margin:6px 0 0 0;padding-left:18px}
+  #gamePanel li{margin-bottom:6px}
+
+  /* responsive */
+  @media (max-width:980px){
+    .grid{grid-template-columns:1fr; }
+    .topline{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>⚾ MLB Master Betting Dashboard v1.1</h1>
+      <div class="topline">Offline demo mode (mock data). Replace mock fetches with real APIs later.</div>
+    </div>
+    <div class="small-muted">Save/Load: localStorage • Mock data → swap for live MLB API</div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT: Controls, bets table, summary -->
+    <div>
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Add / Auto-Fill Bet</h3>
+
+        <label>Team</label>
+        <div class="suggest-wrap">
+          <input id="teamInput" type="text" placeholder="Start typing team (e.g. Yankees)" autocomplete="off" />
+          <div id="suggestions"></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div>
+            <label>Decimal Odds</label>
+            <input id="oddsInput" type="number" step="0.01" min="1.01" placeholder="2.10">
+          </div>
+          <div>
+            <label>Stake ($)</label>
+            <input id="stakeInput" type="number" step="0.01" min="0.01" placeholder="100">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+          <button id="autoCombinedBtn">Auto-Fill (IPC + API)</button>
+          <button id="addBetBtn" style="background:#1abc9c">Add Bet</button>
+          <button id="clearBtn" class="secondary" style="background:#ff4136">Clear All</button>
+        </div>
+
+        <small class="help">IPC = implied probability from odds (1/odds). "API" uses local mock game data for demo.</small>
+
+        <div class="filters" style="margin-top:12px">
+          <label style="margin:0; font-weight:600">Filter:</label>
+          <select id="filterSelect">
+            <option value="all">All bets</option>
+            <option value="value">Value bets only (EV &gt; 0)</option>
+          </select>
+
+          <label style="margin-left:6px; font-weight:600">Sort:</label>
+          <select id="sortSelect">
+            <option value="none">None</option>
+            <option value="ev">EV desc</option>
+            <option value="stake">Stake desc</option>
+            <option value="profit">Profit desc</option>
+          </select>
+
+          <button id="saveBtn" class="secondary" style="margin-left:auto">Save Bets</button>
+          <button id="loadBtn" class="secondary">Load Bets</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin:0 0 8px 0">Game Data Panel</h3>
+        <div id="gamePanel" style="display:none">
+          <div id="gameHeader" style="display:flex;align-items:center;gap:10px">
+            <img id="gameLogo" class="team-logo" src="" alt="" />
+            <div>
+              <div id="matchTitle" style="font-weight:700"></div>
+              <div class="small-muted" id="stadiumText"></div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px">
+            <strong>Probable Pitchers</strong>
+            <ul>
+              <li id="homePitcher">Home: —</li>
+              <li id="awayPitcher">Away: —</li>
+            </ul>
+            <strong>Lineups</strong>
+            <ul id="lineupsList"><li>—</li></ul>
+
+            <strong>Injuries</strong>
+            <ul id="injuriesList"><li class="small-muted">—</li></ul>
+          </div>
+        </div>
+        <div id="noGame" class="small-muted" style="margin-top:8px">Select a team to show game data (mock data).</div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin:0 0 8px 0">Parlay Calculator</h3>
+        <div style="display:flex;gap:8px">
+          <input id="parlayStake" type="number" step="0.01" min="0.01" placeholder="Parlay stake $ (defaults to 10)" />
+          <button id="calcParlay">Calc Parlay</button>
+        </div>
+        <div class="summary-row" id="parlaySummary" style="margin-top:12px;display:none">
+          <div class="pill" id="parlayOddsP">Odds: —</div>
+          <div class="pill" id="parlayProbP">Prob: —</div>
+          <div class="pill" id="parlayEVP">EV: —</div>
+          <div class="pill" id="parlayProfitP">Exp Profit: —</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: bets table & portfolio -->
+    <div>
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Bets Table</h3>
+
+        <table id="betsTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Team</th>
+              <th>IPC %</th>
+              <th>API %</th>
+              <th>Odds</th>
+              <th>Stake</th>
+              <th>EV %</th>
+              <th>Exp $</th>
+              <th>Value?</th>
+              <th>Remove</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4" style="text-align:right;font-weight:700">TOTAL:</td>
+              <td id="totalStakeCell">$0.00</td>
+              <td id="avgEVCell">0.00%</td>
+              <td id="totalProfitCell">$0.00</td>
+              <td colspan="3"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h3 style="margin:0 0 8px 0">Quick Tips</h3>
+        <ul>
+          <li class="small-muted">IPC = implied probability from the odds you type (1/odds).</li>
+          <li class="small-muted">API% uses mock game data (averages mock bookmaker odds). Replace with live API later.</li>
+          <li class="small-muted">Save bets to localStorage to persist across reloads.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------------------
+   Mock data + assets
+   --------------------------- */
+const teamAssets = {
+  "Arizona Diamondbacks": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/ari.png", color:"#A71930" },
+  "Atlanta Braves": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/atl.png", color:"#13274F" },
+  "Baltimore Orioles": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/bal.png", color:"#DF4601" },
+  "Boston Red Sox": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/bos.png", color:"#BD3039" },
+  "Chicago Cubs": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/chc.png", color:"#0E3386" },
+  "Chicago White Sox": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/chw.png", color:"#27251F" },
+  "Cincinnati Reds": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/cin.png", color:"#C6011F" },
+  "Cleveland Guardians": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/cle.png", color:"#E50022" },
+  "Colorado Rockies": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/col.png", color:"#33006F" },
+  "Detroit Tigers": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/det.png", color:"#0C2340" },
+  "Houston Astros": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/hou.png", color:"#EB6E1F" },
+  "Kansas City Royals": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/kc.png", color:"#004687" },
+  "Los Angeles Angels": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/laa.png", color:"#BA0021" },
+  "Los Angeles Dodgers": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/lad.png", color:"#005A9C" },
+  "Miami Marlins": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/mia.png", color:"#00A3E0" },
+  "Milwaukee Brewers": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/mil.png", color:"#12284B" },
+  "Minnesota Twins": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/min.png", color:"#002B5C" },
+  "New York Mets": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/nym.png", color:"#FF5910" },
+  "New York Yankees": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png", color:"#132448" },
+  "Oakland Athletics": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/oak.png", color:"#003831" },
+  "Philadelphia Phillies": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/phi.png", color:"#E81828" },
+  "Pittsburgh Pirates": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/pit.png", color:"#FDB827" },
+  "San Diego Padres": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/sd.png", color:"#2F241D" },
+  "San Francisco Giants": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/sf.png", color:"#FD5A1E" },
+  "Seattle Mariners": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/sea.png", color:"#0C2C56" },
+  "St. Louis Cardinals": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/stl.png", color:"#C41E3A" },
+  "Tampa Bay Rays": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/tb.png", color:"#092C5C" },
+  "Texas Rangers": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/tex.png", color:"#003278" },
+  "Toronto Blue Jays": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/tor.png", color:"#134A8E" },
+  "Washington Nationals": { logo:"https://a.espncdn.com/i/teamlogos/mlb/500/wsh.png", color:"#AB0003" }
+};
+
+const teamNames = Object.keys(teamAssets);
+
+/* Mock games dataset (simulate bookmaker odds, lineups, injuries) */
+const mockGames = [
+  {
+    gamePk: 1,
+    date: "2025-09-26",
+    home: "New York Yankees",
+    away: "Boston Red Sox",
+    venue: "Yankee Stadium",
+    bookmakers: [
+      {name:"BookA", odds: {home:1.90, away:2.10}},
+      {name:"BookB", odds: {home:1.95, away:2.05}}
+    ],
+    probablePitchers: {home:{name:"Gerrit Cole", hand:"R", ERA:2.85}, away:{name:"Chris Sale", hand:"L", ERA:3.50}},
+    lineups: {
+      home: ["LeMahieu (2B)","Judge (RF)","Rizzo (1B)","Stanton (DH)","Torres (SS)"],
+      away: ["Verdugo (LF)","Devers (3B)","Turner (2B)","Yoshida (RF)"]
+    },
+    injuries: ["Yankees: Anthony Rizzo — Day-to-day (concussion)"]
+  },
+  {
+    gamePk: 2,
+    date: "2025-09-26",
+    home: "Los Angeles Dodgers",
+    away: "San Francisco Giants",
+    venue: "Dodger Stadium",
+    bookmakers: [
+      {name:"BookA", odds: {home:1.65, away:2.30}},
+      {name:"BookB", odds: {home:1.70, away:2.20}}
+    ],
+    probablePitchers: {home:{name:"Walker Buehler", hand:"R", ERA:3.10}, away:{name:"Logan Webb", hand:"R", ERA:3.70}},
+    lineups: {
+      home: ["Betts (RF)","Seager (SS)","Muncy (2B)","Bellinger (CF)"],
+      away: ["Yastrzemski (LF)","Belt (1B)","La Stella (2B)"]
+    },
+    injuries: []
+  }
+];
+
+/* -------------------------
+   App state
+   ------------------------- */
+let bets = []; // each bet: {team, ipc, api, odds, stake, ev, expProfit}
+const $ = id => document.getElementById(id);
+
+/* -------------------------
+   Autocomplete & suggestions
+   ------------------------- */
+const teamInput = $('teamInput');
+const suggestions = $('suggestions');
+let selIdx = -1;
+
+teamInput.addEventListener('input', () => {
+  const v = teamInput.value.trim().toLowerCase();
+  suggestions.innerHTML = '';
+  selIdx = -1;
+  if (!v) { suggestions.style.display='none'; return; }
+  const matches = teamNames.filter(n => n.toLowerCase().includes(v));
+  if (!matches.length) { suggestions.style.display='none'; return; }
+  matches.forEach((m,i) => {
+    const div = document.createElement('div');
+    div.textContent = m;
+    div.onclick = () => pickSuggestion(m);
+    suggestions.appendChild(div);
+  });
+  suggestions.style.display='block';
+});
+
+teamInput.addEventListener('keydown', (e) => {
+  const items = suggestions.querySelectorAll('div');
+  if (suggestions.style.display === 'none' || !items.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); selIdx = (selIdx + 1) % items.length; highlight(items); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); selIdx = (selIdx - 1 + items.length) % items.length; highlight(items); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (selIdx >= 0 && items[selIdx]) pickSuggestion(items[selIdx].textContent);
+    else if (items[0]) pickSuggestion(items[0].textContent);
+  }
+});
+
+function highlight(items) {
+  items.forEach((it,i)=> it.style.background = i===selIdx ? '#eef6ff' : '');
+}
+
+function pickSuggestion(name) {
+  teamInput.value = name;
+  suggestions.style.display='none';
+  selIdx = -1;
+  // auto-fill IPC from team known defaults (if any)
+  const assets = teamAssets[name];
+  if (assets && assets.ipc) $('oddsInput').value = (1/(assets.ipc/100)).toFixed(2);
+  // load game data (mock)
+  loadGameData(name);
+}
+
+/* -------------------------
+   Helpers: IPC, EV, format
+   ------------------------- */
+function calcIPCFromOdds(odds){ return (1 / odds) * 100; } // % value
+function calcEV(probDecimal, odds){ return (probDecimal * odds) - 1; } // decimal EV per unit stake
+function fmtPct(d){ return (d*100).toFixed(2) + '%'; }
+function safeNum(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+
+/* -------------------------
+   Auto-fill combined: IPC then mock API
+   ------------------------- */
+async function autoFillCombined() {
+  const oddsVal = safeNum($('oddsInput').value);
+  if (!oddsVal || oddsVal <= 1) { alert('Type valid decimal odds first (e.g. 2.10).'); return; }
+  const ipc = calcIPCFromOdds(oddsVal);
+  $('ipcTemp')?.remove();
+  // show IPC immediate (temporary small hint)
+  const hint = document.createElement('small'); hint.id='ipcTemp'; hint.className='small-muted'; hint.innerText = `IPC: ${ipc.toFixed(2)}%`;
+  teamInput.parentNode.insertBefore(hint, suggestions.nextSibling);
+
+  // Try to get mock API-prob (simulate network)
+  const team = teamInput.value.trim();
+  if (!team) { return {ipc}; }
+  // simulate fetch: look for mockGames where team exists
+  await new Promise(r=>setTimeout(r, 400)); // small delay to simulate network
+  const game = mockGames.find(g => g.home === team || g.away === team);
+  if (!game) {
+    // no mock game for team => keep IPC
+    return {ipc, api:null};
+  }
+  // collect all bookmaker odds for this team (home or away)
+  const isHome = (game.home === team);
+  const prices = game.bookmakers.map(b => isHome ? b.odds.home : b.odds.away).filter(Boolean);
+  if (!prices.length) return {ipc, api:null};
+  const avgOdds = prices.reduce((s,p)=>s+p,0)/prices.length;
+  const apiProb = (1 / avgOdds) * 100;
+  // show subtle notification (non-blocking)
+  setTimeout(()=>{ hint.innerText = `IPC: ${ipc.toFixed(2)}% → API(avg): ${apiProb.toFixed(2)}%`; hint.style.color='#0b6'; }, 120);
+  return {ipc, api: apiProb};
+}
+
+/* -------------------------
+   Add bet logic (uses API% if present)
+   ------------------------- */
+async function addBetHandler() {
+  const team = teamInput.value.trim();
+  const odds = safeNum($('oddsInput').value);
+  const stake = safeNum($('stakeInput').value);
+  if (!team || odds <= 1 || stake <= 0) { alert('Fill Team, Odds, and Stake correctly.'); return; }
+
+  // compute IPC and attempt mock API
+  const {ipc, api} = await autoFillCombined();
+  const usedProb = (api ?? ipc) / 100; // decimal probability
+  const ev = calcEV(usedProb, odds); // per unit stake (decimal)
+  const expProfit = ev * stake; // expected profit in $
+
+  bets.push({
+    team, ipc: ipc.toFixed(2), api: api ? api.toFixed(2) : null,
+    odds, stake, ev, expProfit
+  });
+
+  renderTable();
+  clearInputs();
+  saveBetsToStorage(); // auto-save
+}
+
+/* -------------------------
+   Render table & summary
+   ------------------------- */
+function renderTable(){
+  const tbody = document.querySelector('#betsTable tbody');
+  tbody.innerHTML = '';
+  const filter = $('filterSelect').value;
+  const sort = $('sortSelect').value;
+
+  let list = bets.slice();
+
+  if (filter === 'value') list = list.filter(b => b.ev > 0);
+
+  if (sort === 'ev') list.sort((a,b)=> b.ev - a.ev);
+  else if (sort === 'stake') list.sort((a,b)=> b.stake - a.stake);
+  else if (sort === 'profit') list.sort((a,b)=> b.expProfit - a.expProfit);
+
+  let totalStake = 0, totalProfit = 0, weightedEVsum = 0;
+  list.forEach((b, idx) => {
+    totalStake += b.stake; totalProfit += b.expProfit; weightedEVsum += b.ev * b.stake;
+    const assets = teamAssets[b.team] || {};
+    const logo = assets.logo ? `<img class="logo" src="${assets.logo}" alt="">` : '';
+    const evClass = b.ev >= 0 ? 'ev-pos' : 'ev-neg';
+    const apiCell = b.api ? `${Number(b.api).toFixed(2)}%` : '—';
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${idx+1}</td>
+      <td class="team-cell">${logo}<div>${b.team}</div></td>
+      <td>${Number(b.ipc).toFixed(2)}%</td>
+      <td>${apiCell}</td>
+      <td>${b.odds.toFixed(2)}</td>
+      <td>$${b.stake.toFixed(2)}</td>
+      <td class="${evClass}">${(b.ev*100).toFixed(2)}%</td>
+      <td style="color:${b.expProfit>=0?'green':'#c0392b'}">$${b.expProfit.toFixed(2)}</td>
+      <td>${b.ev>0?'YES ✅':'NO ❌'}</td>
+      <td><button onclick="removeBet(${idx})" style="background:#ff4136;padding:6px 8px;border-radius:6px">X</button></td>
+    `;
+    // tint row slightly with team color if available
+    if (assets.color) row.style.background = hexToRgba(assets.color,0.04);
+    tbody.appendChild(row);
+  });
+
+  // totals
+  $('totalStakeCell').innerText = `$${totalStake.toFixed(2)}`;
+  const avgEV = totalStake ? (weightedEVsum / totalStake) * 100 : 0;
+  $('avgEVCell').innerText = `${avgEV.toFixed(2)}%`;
+  $('totalProfitCell').innerText = `$${totalProfit.toFixed(2)}`;
+}
+
+/* -------------------------
+   Remove / clear / input helpers
+   ------------------------- */
+function removeBet(index){
+  bets.splice(index,1);
+  renderTable();
+  saveBetsToStorage();
+}
+function clearAllBets(){
+  if (!confirm('Clear all bets?')) return;
+  bets = [];
+  renderTable();
+  saveBetsToStorage();
+}
+function clearInputs(){
+  $('teamInput').value=''; $('oddsInput').value=''; $('stakeInput').value='';
+  const temp = $('ipcTemp'); if (temp) temp.remove();
+}
+
+/* -------------------------
+   Parlay calc
+   ------------------------- */
+function calcParlay(){
+  if (!bets.length){ alert('Add at least one bet for parlay calc.'); return; }
+  const stake = safeNum($('parlayStake').value) || 10;
+  let parlayOdds = 1;
+  let parlayProb = 1;
+  bets.forEach(b=>{
+    parlayOdds *= b.odds;
+    const prob = (b.api ? b.api : b.ipc) / 100;
+    parlayProb *= prob;
+  });
+  const parlayEV = (parlayProb * parlayOdds) - 1; // per unit
+  const parlayProfit = parlayEV * stake;
+  $('parlayOddsP').innerText = `Odds: ${parlayOdds.toFixed(2)}`;
+  $('parlayProbP').innerText = `Prob: ${(parlayProb*100).toFixed(2)}%`;
+  $('parlayEVP').innerText = `EV: ${(parlayEV*100).toFixed(2)}%`;
+  $('parlayProfitP').innerText = `Exp $: $${parlayProfit.toFixed(2)}`;
+  $('parlaySummary').style.display = 'flex';
+}
+
+/* -------------------------
+   Game data loader (mock API)
+   ------------------------- */
+async function loadGameData(teamName){
+  $('gamePanel').style.display = 'block';
+  $('noGame').style.display = 'none';
+  const assets = teamAssets[teamName] || {};
+  $('gameLogo').src = assets.logo || '';
+  const g = mockGames.find(m => m.home === teamName || m.away === teamName);
+  if (!g){
+    $('matchTitle').innerText = `${teamName} — No scheduled mock game`;
+    $('stadiumText').innerText = '';
+    $('homePitcher').innerText = 'Home: —';
+    $('awayPitcher').innerText = 'Away: —';
+    $('lineupsList').innerHTML = '<li class="small-muted">No lineup data</li>';
+    $('injuriesList').innerHTML = '<li class="small-muted">No injuries</li>';
+    return;
+  }
+  // populate
+  $('matchTitle').innerText = `${g.away} @ ${g.home}`;
+  $('stadiumText').innerText = `${g.venue} • ${g.date}`;
+  $('homePitcher').innerText = `Home: ${g.probablePitchers.home.name} (${g.probablePitchers.home.hand}) ERA:${g.probablePitchers.home.ERA}`;
+  $('awayPitcher').innerText = `Away: ${g.probablePitchers.away.name} (${g.probablePitchers.away.hand}) ERA:${g.probablePitchers.away.ERA}`;
+  // lineups
+  $('lineupsList').innerHTML = '';
+  if (g.lineups.home && g.lineups.away){
+    const homeItems = g.lineups.home.map(x=>`<li>${x}</li>`).join('');
+    const awayItems = g.lineups.away.map(x=>`<li>${x}</li>`).join('');
+    $('lineupsList').innerHTML = `<li><strong>Home</strong><ul style="list-style:disc;margin-left:14px">${homeItems}</ul></li>
+                                  <li style="margin-top:8px"><strong>Away</strong><ul style="list-style:disc;margin-left:14px">${awayItems}</ul></li>`;
+  } else $('lineupsList').innerHTML = '<li class="small-muted">Lineups not posted</li>';
+  // injuries
+  $('injuriesList').innerHTML = g.injuries.length ? g.injuries.map(x=>`<li>${x}</li>`).join('') : '<li class="small-muted">No reported injuries</li>';
+}
+
+/* -------------------------
+   Save / Load localStorage
+   ------------------------- */
+function saveBetsToStorage(){
+  try{ localStorage.setItem('mlb_bets_v1', JSON.stringify(bets)); alert('Bets saved.'); } catch(e){ console.error(e); alert('Save failed'); }
+}
+function loadBetsFromStorage(){
+  try{
+    const raw = localStorage.getItem('mlb_bets_v1');
+    if (!raw) { alert('No saved bets'); return; }
+    bets = JSON.parse(raw) || [];
+    renderTable();
+    alert('Loaded saved bets.');
+  } catch(e){ console.error(e); alert('Load failed'); }
+}
+
+/* -------------------------
+   Util: hex -> rgba helper
+   ------------------------- */
+function hexToRgba(hex, alpha){
+  if (!hex) return '';
+  const h = hex.replace('#','');
+  const r = parseInt(h.substring(0,2),16);
+  const g = parseInt(h.substring(2,4),16);
+  const b = parseInt(h.substring(4,6),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/* -------------------------
+   Event bindings
+   ------------------------- */
+$('autoCombinedBtn').addEventListener('click', async ()=>{
+  const res = await autoFillCombined();
+  if (res && res.ipc) alert(`IPC: ${res.ipc.toFixed(2)}%` + (res.api ? ` → API(avg): ${res.api.toFixed(2)}%` : ' (API not found for this team)'));
+});
+$('addBetBtn').addEventListener('click', addBetHandler);
+$('clearBtn').addEventListener('click', clearAllBets);
+$('calcParlay').addEventListener('click', calcParlay);
+$('saveBtn').addEventListener('click', saveBetsToStorage);
+$('loadBtn').addEventListener('click', loadBetsFromStorage);
+$('filterSelect').addEventListener('change', renderTable);
+$('sortSelect').addEventListener('change', renderTable);
+
+/* init */
+renderTable();
+
+/* Optional: try to auto-load saved bets quietly if present */
+(function tryAutoLoad(){
+  const raw = localStorage.getItem('mlb_bets_v1');
+  if (raw) { try{ bets = JSON.parse(raw) || []; renderTable(); } catch(e){} }
+})();
+</script>
+</body>
+</html>
